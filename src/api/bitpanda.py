@@ -9,176 +9,150 @@ class Bitpanda:
     Wrapper for the Bitpanda API.
     """
 
-    base_url = 'https://api.bitpanda.com/v1/'
-
-
     page_size = 200
+
+
+    def __init__(self, api_key: str = ''):
+        self.api_key = api_key
 
 
     # API METHODS
 
-    async def make_request(self, options: dict):
+    async def make_request(self, path: str, method: str = 'get') -> dict:
         """
         Internal implementation to make a request to the Bitpanda API.
         """
 
-        method = options['method'] if 'method' in options else 'get'
+        # Build request URL
+        url = 'https://api.bitpanda.com/v1/' + path
 
-        try:
-            req_options = {
-                'method': method,
-                'url': self.base_url + options['path'],
-                'headers': {}
-            }
+        async with httpx.AsyncClient() as client:
+            response = await client.request(method, url, headers={'X-API-KEY': self.api_key})
 
-            # User passed an API key? Add it to the request headers.
-            if 'api_key' in options:
-                req_options['headers']['X-API-KEY'] = options['api_key']
+        if not response or response.status_code != 200:
+            raise Exception('Invalid or empty response.')
 
-            async with httpx.AsyncClient() as client:
-                response = await client.request(
-                    req_options['method'],
-                    req_options['url'],
-                    headers = req_options['headers']
-                )
-
-            if not response or response.status_code != 200:
-                raise Exception('Invalid or empty response.')
-
-            return response.json()
-
-        except:
-            raise
+        return response.json()
 
 
-    async def get_trades(self, api_key: str):
+    async def get_trades(self) -> list:
         """
         Get all trades made by the user, sorted by date.
         """
 
+        trades = []
+        has_more = True
+
+        path = 'trades?page=1&page_size={}'.format(self.page_size)
+
         try:
-            trades = []
-            has_more = True
-
-            options = {
-                'path': 'trades?page=1&page_size={}'.format(self.page_size),
-                'api_key': api_key,
-            }
-
             while has_more:
-                result = await self.make_request(options)
+                result = await self.make_request(path)
                 trades += [trade['attributes'] for trade in result['data']]
 
                 # Keep fetching trades while there are more pages on the result.
                 if 'links' in result and 'next' in result['links']:
-                    options['path'] = 'trades{}'.format(result['links']['next'])
+                    path = 'trades{}'.format(result['links']['next'])
 
                 else:
                     has_more = False
 
+            # Sort trades (by timestamp)
             trades.sort(key=lambda d: d['time']['unix'])
-
-            return trades
 
         except:
             raise
 
+        return trades
 
-    async def get_fiat_transactions(self, api_key: str):
+
+    async def get_fiat_transactions(self) -> list:
         """
         Get user's fiat transactions, sorted by date.
         """
 
+        transactions = []
+        has_more = True
+
+        path = 'fiatwallets/transactions?page=1&page_size={}'.format(self.page_size)
+
         try:
-            transactions = []
-            has_more = True
-
-            options = {
-                'path': 'fiatwallets/transactions?page=1&page_size={}'.format(self.page_size),
-                'api_key': api_key,
-            }
-
             while has_more:
-                result = await self.make_request(options)
+                result = await self.make_request(path)
                 transactions += [transaction['attributes'] for transaction in result['data']]
 
                 # Keep fetching transactions while there are more pages on the result.
                 if 'links' in result and 'next' in result['links']:
-                    options['path'] = 'fiatwallets/transactions{}'.format(result['links']['next'])
+                    path = 'fiatwallets/transactions{}'.format(result['links']['next'])
 
                 else:
                     has_more = False
 
             transactions.sort(key=lambda d: d['time']['unix'])
 
-            return transactions
-
         except:
             raise
 
+        return transactions
 
-    async def get_wallets(self, api_key: str):
+
+    async def get_wallets(self) -> list:
         """
         Get list of crypto wallets from the user.
         """
 
         try:
-            options = {
-                'path': 'wallets',
-                'api_key': api_key,
-            }
+            wallets = await self.make_request('wallets')
 
-            result = await self.make_request(options)
-
-            return [wallet['attributes'] for wallet in result['data']]
+            return [w['attributes'] for w in wallets['data']]
 
         except:
             raise
 
 
-    async def get_fiat_wallets(self, api_key: str):
+    async def get_fiat_wallets(self) -> list:
         """
         Get list of fiat wallets from the user.
         """
 
         try:
-            options = {
-                'path': 'fiatwallets',
-                'api_key': api_key,
-            }
+            fiat_wallets = await self.make_request('fiatwallets')
 
-            result = await self.make_request(options)
-
-            return [wallet['attributes'] for wallet in result['data']]
+            return [fw['attributes'] for fw in fiat_wallets['data']]
 
         except:
             raise
 
 
-    async def get_ticker(self):
+    async def get_ticker(self) -> dict:
         """
         Get prices ticker for all available assets.
         """
 
         try:
-            options = {
-                'path': 'ticker',
-            }
-
-            result = await self.make_request(options)
-
-            return result
+            return await self.make_request('ticker')
 
         except:
             raise
 
 
-    async def get_report(self, api_key: str):
+    async def fetch_data(self) -> dict:
+        return {
+            'ticker': await self.get_ticker(),
+            'wallets': await self.get_wallets(),
+            'trades': await self.get_trades(),
+            'fiat_wallets': await self.get_fiat_wallets(),
+            'fiat_transactions': await self.get_fiat_transactions(),
+        }
+
+
+    def get_report(self) -> dict:
         """
         Get a full report by matching wallets, trades and transactions.
         """
 
         wallets = {}
+
         best_wallet = {
             'id': '',
             'symbol': '',
@@ -198,15 +172,10 @@ class Bitpanda:
         withdrawal_count = 0
         fiat_balance = 0
 
-
         # Get all the necessary data from Bitpanda.
-        data = {
-            'ticker': await self.get_ticker(),
-            'wallets': await self.get_wallets(api_key),
-            'trades': await self.get_trades(api_key),
-            'fiat_wallets': await self.get_fiat_wallets(api_key),
-            'fiat_transactions': await self.get_fiat_transactions(api_key),
-        }
+        loop = asyncio.get_event_loop()
+        data = loop.run_until_complete(self.fetch_data())
+        loop.close()
 
         # Create the resulting wallets array with the correct asset IDs.
         for w in data['wallets']:
@@ -265,12 +234,9 @@ class Bitpanda:
                 total_deposit += eur_amount
                 deposit_count += 1
 
-            elif t['type'] == 'withdrawal':
+            if t['type'] == 'withdrawal':
                 total_withdrawal += eur_amount
                 withdrawal_count += 1
-
-            if 'trade' not in t or t['trade']['type'] != 'trade':
-                continue
 
         # Parse trades and add them to the related wallets.
         for t in data['trades']:
@@ -292,7 +258,7 @@ class Bitpanda:
             if t['type'] == 'buy':
                 wallets[t['cryptocoin_id']]['buy'].append(info)
 
-            elif t['type'] == 'sell':
+            if t['type'] == 'sell':
                 wallets[t['cryptocoin_id']]['sell'].append(info)
 
             # Paid with BEST?
@@ -314,40 +280,17 @@ class Bitpanda:
             wallets[t['cryptocoin_id']]['total_fees'] += info['fee']
 
         # Iterate wallets to calculate trading profits or losses.
-        for w in wallets.values():
-            wallet = w
-
+        for wallet in wallets.values():
             # No transactions? Stop here.
             if not wallet['buy'] and not wallet['sell']:
                 continue
 
             # Purchased assets? Calculate total in fiat.
             if wallet['buy']:
-                arr_buy = []
-
-                for trade in wallet['buy']:
-                    if 'asset_amount' in trade:
-                        arr_buy.append([trade['asset_amount'], trade['cost'] / trade['asset_amount']])
-
-                    else:
-                        pass
-                        # logger.warn("Bitpanda.getReport", "No assetAmount", JSON.stringify(trade, null, 0))
-
                 wallet['total_buy'] = sum([t['cost'] for t in wallet['buy']])
 
             # Solds assets? Calculate total in fiat.
             if wallet['sell']:
-                arr_sell = []
-
-                for trade in wallet['sell']:
-                    if 'asset_amount' in trade:
-                        arr_sell.append([trade['asset_amount'], trade['cost'] / trade['asset_amount']])
-
-                    else:
-                        # logger.warn("Bitpanda.getReport", "No assetAmount", JSON.stringify(trade, null, 0))
-
-                        pass
-
                 wallet['total_sell'] = sum([t['cost'] for t in wallet['sell']])
 
             # How many assets were bought and sold? Calculate balance.
@@ -388,7 +331,7 @@ class Bitpanda:
         best_wallet['sell'] = [t for t in best_wallet['sell'] if t['cost'] > 0]
         total_profit += sum([w['total_fees'] for w in active_wallets])
 
-        result = {
+        return {
             'wallets': active_wallets,
             'profit': total_profit,
             'deposit': total_deposit,
@@ -398,12 +341,10 @@ class Bitpanda:
             'fiat_balance': fiat_balance
         }
 
-        return result
-
 
     # HELPERS
 
-    def weighted_avg(total: int, positions: list) -> int:
+    def weighted_avg(self, total: int, positions: list) -> int:
         """
         Calculate the weighted price average based on volume.
         """

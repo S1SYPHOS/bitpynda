@@ -98,9 +98,11 @@ def connect(ctx: dict, api_key: str, output_file: str) -> None:
     # Fetch report
     if ctx.obj['verbose'] > 0: click.echo('Fetching portfolio ..')
 
-    loop = asyncio.get_event_loop()
-    report = loop.run_until_complete(Bitpanda().get_report(api_key))
-    loop.close()
+    try:
+        report = Bitpanda(api_key).get_report()
+
+    except Exception as e:
+        click.Context.fail(ctx, e)
 
     if ctx.obj['verbose'] > 1:
         # Present findings
