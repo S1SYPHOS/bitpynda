@@ -37,6 +37,10 @@ def load_yaml(file: io.BufferedReader) -> dict:
     return {}
 
 
+def pretty_print(data) -> None:
+    print(yaml.dump(data, allow_unicode=True, default_flow_style=False))
+
+
 # Quick & dirty slugs
 def slugify(string: str) -> str:
     # Convert to lowercase

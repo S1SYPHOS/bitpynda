@@ -4,7 +4,7 @@ import click
 
 from .api.bitpanda import Bitpanda
 from .tax.report import Report
-from .utils import load_yaml, dump_json
+from .utils import load_yaml, dump_json, pretty_print
 
 
 @click.group()
@@ -101,12 +101,11 @@ def connect(ctx: dict, api_key: str, output_file: str) -> None:
     try:
         report = Bitpanda(api_key).get_report()
 
+        # Present findings
+        if ctx.obj['verbose'] > 1:
+            pretty_print(report)
+
+        dump_json(report, '{}.json'.format(output_file))
+
     except Exception as e:
         click.Context.fail(ctx, e)
-
-    if ctx.obj['verbose'] > 1:
-        # Present findings
-        for key, value in report.items():
-            print('{}: {}'.format(key, value))
-
-    dump_json(report, '{}.json'.format(output_file))
